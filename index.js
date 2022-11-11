@@ -38,17 +38,53 @@ if (fs.existsSync("./uploads")) {
 
 app.use("/uploads", express.static("uploads"));
 
-app.post("/upload/:roomId", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    res.status(400).send("No file uploaded.");
-    return;
+app.post(
+  "/upload/:roomId",
+  (req, res, next) => {
+    // check user upload token
+    const uploadToken = req.query.token;
+    if (!uploadToken) {
+      res.status(401).send({ status: "failed", message: "no upload token" });
+      return;
+    }
+    // get room id from request path param
+    const roomId = req.params.roomId;
+    // check if room exists
+    if (!rooms[roomId]) {
+      res.status(400).send({ status: "failed", message: "room doesn't exist" });
+      return;
+    }
+    const user = rooms[roomId].users.filter((user) => user.uploadToken === uploadToken)?.[0];
+    if (!user) {
+      res.status(401).send({ status: "failed", message: "invalid upload token" });
+      return;
+    }
+    // set username in request
+    req.uploader = user.username;
+    next();
+  },
+  upload.single("file"),
+  (req, res) => {
+    if (!req.file) {
+      res.status(400).send("No file uploaded.");
+      return;
+    }
+    const uploader = req.uploader;
+    rooms[req.params.roomId].files.push({
+      name: req.file.originalname,
+      path: req.file.path,
+      uploader,
+    });
+    io.to(req.params.roomId).emit("file-upload", {
+      name: req.file.originalname,
+      path: req.file.path,
+      uploader,
+    });
+    console.log("file upload", req.file.path);
+    console.log(req.params);
+    res.status(200).send({ status: "success" });
   }
-  rooms[req.params.roomId].files.push({ path: req.file.path });
-  io.to(req.params.roomId).emit("file-upload", { path: req.file.path });
-  console.log("file upload", req.file.path);
-  console.log(req.params);
-  res.status(200).send({ status: "success" });
-});
+);
 
 const io = new socketIO.Server(server, {
   cors: {
@@ -70,7 +106,7 @@ function writeFile(path, contents, cb) {
 const registerListeners = (socket, { roomId, username }) => {
   socket.on("disconnect", () => {
     console.log("disconnect");
-    rooms[roomId].users = rooms[roomId].users.filter((s) => s !== username);
+    rooms[roomId].users = rooms[roomId].users.filter((s) => s.username !== username);
     socket.broadcast.emit("user-disconnected", username);
     // check if room is empty and delete it
     if (rooms[roomId].users.length === 0) {
@@ -103,7 +139,7 @@ io.on("connection", (socket) => {
     fs.mkdirSync(`./uploads/${roomId}`, { recursive: true });
   }
 
-  if (rooms[roomId].users.includes(username)) {
+  if (rooms[roomId].users.map((user) => user.username).includes(username)) {
     socket.emit("username-taken");
     socket.disconnect();
     return;
@@ -111,10 +147,16 @@ io.on("connection", (socket) => {
 
   console.log("new connection to room", roomId, "from", username);
 
-  rooms[roomId].users.push(username);
+  const userUploadToken = uuidv4();
+  rooms[roomId].users.push({ username, uploadToken: userUploadToken });
   io.to(roomId).emit("new-user", username);
   socket.join(roomId);
-  socket.emit("room-data", { id: roomId, files: rooms[roomId].files, users: rooms[roomId].users });
+  socket.emit("room-data", {
+    id: roomId,
+    files: rooms[roomId].files,
+    users: rooms[roomId].users.map((user) => user.username),
+    uploadToken: userUploadToken,
+  });
   registerListeners(socket, { roomId, username });
 });
 
