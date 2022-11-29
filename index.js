@@ -28,7 +28,7 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + "-" + file.originalname);
   },
 });
-const upload = multer({ storage: storage });
+const upload = multer({ storage, limits: { fileSize: 50_000_000 } }); // max size of 50MB
 
 // clear uploads folder on server start
 if (fs.existsSync("./uploads")) {
