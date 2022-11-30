@@ -160,4 +160,8 @@ io.on("connection", (socket) => {
   registerListeners(socket, { roomId, username });
 });
 
+app.get("/", (req, res) => {
+  res.send("Hello 🤩");
+});
+
 server.listen(4000);
