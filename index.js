@@ -164,4 +164,4 @@ app.get("/", (req, res) => {
   res.send("Hello 🤩");
 });
 
-server.listen(4000);
+server.listen(4000, () => console.log("server is running on port 4000 🚀"));
