@@ -6,9 +6,11 @@ const uuidv4 = require("uuid").v4;
 const fs = require("fs");
 const getDirName = require("path").dirname;
 const multer = require("multer");
+const bodyParser = require("body-parser");
 
 const app = express();
 app.use(cors());
+app.use(bodyParser.json());
 const server = http.createServer(app);
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -119,33 +121,27 @@ const registerListeners = (socket, { roomId, username }) => {
 };
 
 io.on("connection", (socket) => {
-  let roomId = socket.handshake.query.roomId;
-  const username = socket.handshake.query.username;
+  const roomId = socket.handshake.query.roomId;
+  const connectionCode = socket.handshake.query.connectionCode;
 
-  if (!username) {
+  if (!roomId || !connectionCode || !rooms[roomId]) {
     socket.disconnect();
     return;
   }
 
-  if (!roomId) {
-    roomId = uuidv4();
-  }
-
-  if (!rooms[roomId]) {
-    rooms[roomId] = {
-      files: [],
-      users: [],
-    };
-    fs.mkdirSync(`./uploads/${roomId}`, { recursive: true });
-  }
-
-  if (rooms[roomId].users.map((user) => user.username).includes(username)) {
-    socket.emit("username-taken");
+  const connectionData = rooms[roomId].connectionCodes.find(
+    (info) => info.connectionCode === connectionCode
+  );
+  if (!connectionData) {
     socket.disconnect();
     return;
   }
 
-  console.log("new connection to room", roomId, "from", username);
+  const username = connectionData.username;
+
+  rooms[roomId].connectionCodes = rooms[roomId].connectionCodes.filter(
+    (info) => info.code !== connectionCode
+  );
 
   const userUploadToken = uuidv4();
   rooms[roomId].users.push({ username, uploadToken: userUploadToken });
@@ -156,12 +152,54 @@ io.on("connection", (socket) => {
     files: rooms[roomId].files,
     users: rooms[roomId].users.map((user) => user.username),
     uploadToken: userUploadToken,
+    username,
   });
   registerListeners(socket, { roomId, username });
 });
 
 app.get("/", (req, res) => {
   res.send("Hello 🤩");
+});
+
+app.post("/rooms/new", (req, res) => {
+  const username = req.body.username;
+  if (!username) {
+    res.status(400).send({ status: "failed", message: "no username provided" });
+    return;
+  }
+  const newRoomId = uuidv4();
+  rooms[newRoomId] = {
+    files: [],
+    users: [],
+    connectionCodes: [],
+  };
+  fs.mkdirSync(`./uploads/${newRoomId}`, { recursive: true });
+
+  const userConnectionCode = uuidv4();
+  rooms[newRoomId].connectionCodes = [{ username, connectionCode: userConnectionCode }];
+  res
+    .status(200)
+    .send({ status: "success", roomId: newRoomId, connectionCode: userConnectionCode });
+});
+
+app.post("/rooms/join", (req, res) => {
+  const roomId = req.body.roomId;
+  const username = req.body.username;
+  if (!roomId || !username) {
+    res.status(400).send({ status: "failed", message: "no roomId or username provided" });
+    return;
+  }
+  if (!rooms[roomId]) {
+    res.status(400).send({ status: "failed", message: "room doesn't exist" });
+    return;
+  }
+  if (rooms[roomId].users.map((user) => user.username).includes(username)) {
+    res.status(400).send({ status: "failed", message: "username already taken" });
+    return;
+  }
+  const userConnectionCode = uuidv4();
+  rooms[roomId].connectionCodes.push({ username, connectionCode: userConnectionCode });
+  res.status(200).send({ status: "success", roomId, connectionCode: userConnectionCode });
 });
 
 server.listen(4000, () => console.log("server is running on port 4000 🚀"));
