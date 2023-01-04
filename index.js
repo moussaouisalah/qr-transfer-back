@@ -8,6 +8,18 @@ const getDirName = require("path").dirname;
 const multer = require("multer");
 const bodyParser = require("body-parser");
 
+const generateRandomIdNoCollision = (existingIds) => {
+  let id = "";
+  const letters = "ABCDEFGHJKLMNPRSTUVWXYZ"; // no I, O, or Q to avoid confusion
+  do {
+    id = "";
+    for (let i = 0; i < 4; i++) {
+      id += letters[Math.floor(Math.random() * letters.length)];
+    }
+  } while (existingIds.includes(id));
+  return id;
+};
+
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -167,7 +179,7 @@ app.post("/rooms/new", (req, res) => {
     res.status(400).send({ status: "failed", message: "no username provided" });
     return;
   }
-  const newRoomId = uuidv4();
+  const newRoomId = generateRandomIdNoCollision(Object.keys(rooms));
   rooms[newRoomId] = {
     files: [],
     users: [],
